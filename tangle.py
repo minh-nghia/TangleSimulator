@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
-
+import threading
 
 class Tangle(object):
 
@@ -20,7 +20,7 @@ class Tangle(object):
 
         self.cw_cache = dict()
         self.t_cache = set()
-
+        self.tip_walk_cache = list()
 
     def next_transaction(self):
         dt_time = np.random.exponential(1.0/self.rate)
@@ -68,11 +68,39 @@ class Tangle(object):
         particles = np.random.choice(candidates, num_particles)
         distances = {}
         for p in particles:
-            tip, distance = self._walk(p)
-            distances[tip] = distance
+            t = threading.Thread(target=self._walk2(p))
+            t.start()
+#            tip, distance = self._walk(p)
+#            distances[tip] = distance
+            
+        #return [key for key in sorted(distances, key=distances.get, reverse=False)[:2]]
+        tips = self.tip_walk_cache[:2]
+        self.tip_walk_cache = list()
 
-        return [key for key in sorted(distances, key=distances.get, reverse=False)[:2]]
+        return tips
 
+    def _walk2(self, starting_transaction):
+        p = starting_transaction
+        while not p.is_tip_delayed() and p.is_visible():
+            if len(self.tip_walk_cache) >= 2:
+                return
+
+            next_transactions = p.approved_directly_by()
+            if self.alpha > 0:
+                p_cw = p.cumulative_weight_delayed()
+                c_weights = np.array([])
+                for transaction in next_transactions:
+                    c_weights = np.append(c_weights, transaction.cumulative_weight_delayed())
+
+                deno = np.sum(np.exp(-self.alpha * (p_cw - c_weights)))
+                probs = np.divide(np.exp(-self.alpha * (p_cw - c_weights)), deno)
+            else:
+                probs = None
+
+            p = np.random.choice(next_transactions, p=probs)
+
+        self.tip_walk_cache.append(p)
+    
     def _walk(self, starting_transaction):
         p = starting_transaction
         count = 0
